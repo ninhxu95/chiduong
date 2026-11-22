@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Chỉ Đường">
-<meta name="theme-color" content="#f4efe4">
+<meta name="theme-color" content="#eaf6fd">
 <title>Chỉ Đường Xe Máy</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -14,15 +14,27 @@
 
 <div id="map"></div>
 
-<!-- Thanh tìm kiếm -->
+<!-- ===== Trên: tìm kiếm / chỉ dẫn rẽ ===== -->
 <div id="top">
   <div id="searchRow">
-    <input id="q" type="search" placeholder="Đi đâu? (vd: Chợ Bến Thành)" autocomplete="off" enterkeyhint="search">
-    <button id="btnSearch" class="btn">Tìm</button>
+    <div id="qWrap">
+      <span class="qIcon">🔍</span>
+      <input id="q" type="search" placeholder="Bạn muốn đi đâu?" autocomplete="off" enterkeyhint="search">
+      <button id="qClear" class="hidden" aria-label="Xóa">×</button>
+    </div>
+  </div>
+  <div id="chips">
+    <button class="chip" data-cat="fuel">⛽ Cây xăng</button>
+    <button class="chip" data-cat="repair">🔧 Sửa xe</button>
+    <button class="chip" data-cat="atm">🏧 ATM</button>
+    <button class="chip" data-cat="cafe">☕ Cà phê</button>
+    <button class="chip" data-cat="food">🍜 Quán ăn</button>
+    <button class="chip" data-cat="parking">🅿️ Gửi xe</button>
+    <button class="chip" data-cat="hospital">🏥 Bệnh viện</button>
+    <button class="chip" data-cat="toilets">🚻 WC</button>
   </div>
   <div id="results"></div>
 
-  <!-- Chỉ dẫn rẽ, hiện khi đang dẫn đường -->
   <div id="turn" class="hidden">
     <div id="turnIcon">↑</div>
     <div id="turnText">
@@ -30,83 +42,94 @@
       <div id="turnName">—</div>
     </div>
   </div>
+  <div id="alert" class="hidden">
+    <span id="alertIcon">📷</span>
+    <span id="alertText">Camera tốc độ</span>
+    <b id="alertDist">—</b>
+  </div>
 </div>
 
-<!-- Cảnh báo camera -->
-<div id="camAlert" class="hidden">
-  <span class="camDot"></span>
-  <span>CAMERA TỐC ĐỘ</span>
-  <b id="camDist">—</b>
+<!-- ===== Nút bên phải ===== -->
+<div id="side">
+  <button id="btnLayers" class="round" aria-label="Kiểu bản đồ">🗺️</button>
+  <button id="zIn" class="round">+</button>
+  <button id="zOut" class="round">−</button>
+  <button id="btnCenter" class="round" aria-label="Về vị trí">➤</button>
 </div>
 
-<!-- Bảng điều khiển dưới -->
+<!-- ===== Dưới ===== -->
 <div id="bottom">
-  <div id="dash">
+  <div id="gauges">
     <div id="speedBox">
       <div id="speed">0</div>
-      <div class="unit">km/h <span id="offTag" class="hidden"></span></div>
+      <div class="unit">km/h<span id="offTag" class="hidden"></span></div>
     </div>
-    <div id="limitBox" title="Giới hạn tốc độ">
-      <div id="limitSign"><span id="limit">--</span></div>
-      <div id="limitNote">giới hạn</div>
-    </div>
+    <div id="limitSign"><span id="limit">--</span><small id="limitNote">giới hạn</small></div>
+    <div class="grow"></div>
+    <button id="btnReport" aria-label="Báo cáo">⚠️</button>
+  </div>
+  <div id="bar">
     <div id="tripBox">
       <div id="eta">--:--</div>
-      <div id="remain">Chưa có tuyến</div>
+      <div id="remain">Chạm ô tìm kiếm để chọn nơi đến</div>
     </div>
-  </div>
-  <!-- Hiệu chỉnh chênh lệch tốc độ, mở khi chạm vào số km/h -->
-  <div id="calib" class="hidden">
-    <div class="calTitle">Hiệu chỉnh cho khớp đồng hồ xe</div>
-    <div class="calRow">
-      <button id="offMinus" class="btn ghost">−</button>
-      <div id="offVal">0 km/h</div>
-      <button id="offPlus" class="btn ghost">+</button>
-    </div>
-    <div class="calHint">GPS đo: <b id="rawSpeed">0</b> km/h · Cảnh báo quá tốc độ vẫn dùng tốc độ thực GPS</div>
-    <div class="calRow">
-      <button id="offReset" class="btn ghost">Đặt lại 0</button>
-      <button id="offClose" class="btn">Xong</button>
-    </div>
-  </div>
-  <!-- Cài đặt nguồn dữ liệu Vietmap -->
-  <div id="settings" class="hidden">
-    <div class="calTitle">Dữ liệu Vietmap</div>
-    <div class="calHint">Dán khóa API Vietmap để tìm địa chỉ và tìm đường riêng cho xe máy bằng dữ liệu Vietmap. Không có khóa thì app dùng OpenStreetMap.</div>
-    <input id="vmKey" type="text" placeholder="Khóa API Vietmap" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <div class="calHint" id="vmStatus"></div>
-    <div class="calRow">
-      <button id="setClear" class="btn ghost">Xóa khóa</button>
-      <button id="setSave" class="btn">Lưu</button>
-    </div>
-  </div>
-  <div id="actions">
-    <button id="btnCenter" class="btn ghost">◎ Về vị trí</button>
-    <button id="btnCam" class="btn ghost">＋ Camera</button>
-    <button id="btnBeep" class="btn ghost">🔔 Bíp: Bật</button>
-    <button id="btnSet" class="btn ghost" style="flex:0 0 44px">⚙</button>
-    <button id="btnStop" class="btn danger hidden">✕ Dừng</button>
+    <button id="btnSet" class="pill" aria-label="Cài đặt">⚙</button>
+    <button id="btnStop" class="pill stop hidden">Dừng</button>
   </div>
 </div>
 
-<div id="zoom">
-  <button id="zIn" class="btn ghost">+</button>
-  <button id="zOut" class="btn ghost">−</button>
+<!-- ===== Bảng trượt: báo cáo ===== -->
+<div id="sheetReport" class="sheet hidden">
+  <div class="sheetHead">Báo cáo trên đường<button class="x" data-close>×</button></div>
+  <div class="grid">
+    <button class="rep" data-type="police"><span>👮</span>Cảnh sát</button>
+    <button class="rep" data-type="camera"><span>📷</span>Camera</button>
+    <button class="rep" data-type="accident"><span>💥</span>Tai nạn</button>
+    <button class="rep" data-type="jam"><span>🚗</span>Kẹt xe</button>
+    <button class="rep" data-type="flood"><span>🌊</span>Ngập nước</button>
+    <button class="rep" data-type="hazard"><span>⚠️</span>Nguy hiểm</button>
+  </div>
+  <p class="note">Báo cáo lưu trên máy này và tự hết hạn (cảnh sát, tai nạn: 2 giờ · kẹt xe: 1 giờ · ngập, nguy hiểm: 6 giờ · camera: giữ mãi). Bấm lại cùng loại ở cùng chỗ để xóa.</p>
+</div>
+
+<!-- ===== Bảng trượt: kiểu bản đồ ===== -->
+<div id="sheetLayers" class="sheet hidden">
+  <div class="sheetHead">Kiểu bản đồ<button class="x" data-close>×</button></div>
+  <div class="grid three">
+    <button class="sty" data-style="waze"><i class="sw waze"></i>Waze</button>
+    <button class="sty" data-style="detail"><i class="sw detail"></i>Chi tiết</button>
+    <button class="sty" data-style="sat"><i class="sw sat"></i>Vệ tinh</button>
+  </div>
+  <label class="row"><input type="checkbox" id="opt3d" checked> Bản đồ 3D xoay theo hướng đi khi dẫn đường</label>
+  <p class="note"><b>Chi tiết</b> hiện số nhà, hẻm, cửa hàng rõ nhất khi phóng to tối đa.</p>
+</div>
+
+<!-- ===== Bảng trượt: cài đặt ===== -->
+<div id="sheetSet" class="sheet hidden">
+  <div class="sheetHead">Cài đặt<button class="x" data-close>×</button></div>
+  <div class="label">Hiệu chỉnh cho khớp đồng hồ xe</div>
+  <div class="stepper">
+    <button id="offMinus" class="pill">−</button>
+    <div id="offVal">0 km/h</div>
+    <button id="offPlus" class="pill">+</button>
+  </div>
+  <p class="note">GPS đo: <b id="rawSpeed">0</b> km/h. Cảnh báo quá tốc độ vẫn dùng tốc độ thực GPS. <a id="offReset">Đặt lại 0</a></p>
+  <label class="row"><input type="checkbox" id="optBeep" checked> Âm bíp cảnh báo</label>
 </div>
 
 <div id="toast" class="hidden"></div>
 
-<!-- Màn hình bắt đầu: cần 1 lần chạm để iOS cho phép GPS và âm thanh -->
 <div id="start">
   <div class="card">
-    <h1>Chỉ Đường<br><em>Xe Máy</em></h1>
+    <div class="logo">➤</div>
+    <h1>Chỉ Đường<br>Xe Máy</h1>
     <ul>
-      <li>Tốc độ thực theo GPS</li>
-      <li>Biển giới hạn tốc độ</li>
-      <li>Cảnh báo camera bắn tốc độ</li>
+      <li>Bản đồ 3D xoay theo hướng đi</li>
+      <li>Tốc độ thực và biển giới hạn</li>
+      <li>Cảnh báo camera, cảnh sát, ngập, kẹt xe</li>
     </ul>
-    <button id="btnStart" class="btn big">Bắt đầu</button>
-    <p class="tip">Mẹo: vào <b>Cài đặt › Màn hình &amp; Độ sáng › Tự động khóa › Không bao giờ</b> để màn hình không tắt khi đang đi.</p>
+    <button id="btnStart" class="big">Bắt đầu</button>
+    <p class="tip">Vào <b>Cài đặt › Màn hình &amp; Độ sáng › Tự động khóa › Không bao giờ</b> để màn hình không tắt khi đang chạy. Gạt tắt nút im lặng để nghe tiếng bíp.</p>
   </div>
 </div>
 

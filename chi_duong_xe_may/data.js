@@ -1,15 +1,12 @@
-/* Dữ liệu: tìm địa chỉ, tìm đường, giới hạn tốc độ, camera.
-   Tất cả là dịch vụ miễn phí dựa trên OpenStreetMap. */
+/* Dữ liệu: tìm địa chỉ, tìm đường xe máy, giới hạn tốc độ, camera, địa điểm quanh đây.
+   Tất cả là dịch vụ miễn phí dựa trên OpenStreetMap, không cần khóa API. */
 (function () {
   'use strict';
 
   var NOMINATIM = 'https://nominatim.openstreetmap.org/search';
+  var VALHALLA = 'https://valhalla1.openstreetmap.de/route';
   var OSRM = 'https://router.project-osrm.org/route/v1/driving/';
   var OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
-  var VM = 'https://maps.vietmap.vn/api/';
-  var vmKey = '';
-  function setKey(k) { vmKey = (k || '').trim(); }
-  function hasKey() { return !!vmKey; }
 
   // ---------- Hình học ----------
   var R = 6371000;
@@ -30,7 +27,7 @@
   }
   function angleDiff(a, b) { var d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
 
-  // Khoảng cách từ điểm p tới đoạn a-b (mét), dùng phép chiếu phẳng cục bộ
+  // Khoảng cách từ điểm p tới đoạn a-b (mét), phép chiếu phẳng cục bộ
   function segDist(p, a, b) {
     var k = Math.cos(rad(p.lat)) * 111320, m = 110540;
     var ax = (a[1] - p.lon) * k, ay = (a[0] - p.lat) * m;
@@ -40,7 +37,6 @@
     var x = ax + t * dx, y = ay + t * dy;
     return { d: Math.sqrt(x * x + y * y), t: t };
   }
-  // Điểm gần nhất trên tuyến, tìm quanh vị trí cũ để nhanh hơn
   function nearestOnLine(p, line, hint) {
     var best = { d: Infinity, i: 0, t: 0 };
     var from = hint ? Math.max(0, hint - 30) : 0;
@@ -60,32 +56,14 @@
     });
   }
   function overpass(q) {
-    var body = 'data=' + encodeURIComponent(q);
-    var opts = { method: 'POST', body: body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
+    var opts = { method: 'POST', body: 'data=' + encodeURIComponent(q),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
     return fetchJSON(OVERPASS[0], opts).catch(function () { return fetchJSON(OVERPASS[1], opts); });
   }
 
   // ---------- Tìm địa chỉ ----------
-  // Có khóa Vietmap thì dùng Vietmap (địa chỉ Việt Nam đầy đủ hơn, hiểu cả địa chỉ cũ và mới),
-  // lỗi hoặc không có khóa thì dùng OpenStreetMap.
   function search(q, near) {
-    if (!vmKey) return searchOSM(q, near);
-    var url = VM + 'autocomplete/v4?apikey=' + encodeURIComponent(vmKey) + '&display_type=1&text=' + encodeURIComponent(q);
-    if (near) url += '&focus=' + near.lat + ',' + near.lon;
-    return fetchJSON(url).then(function (list) {
-      return (list || []).map(function (r) {
-        return { ref: r.ref_id, name: r.name || r.display, addr: r.address || '', src: 'vm' };
-      });
-    }).catch(function () { return searchOSM(q, near); });
-  }
-  // Kết quả Vietmap chưa có tọa độ, phải hỏi thêm theo ref_id
-  function resolve(r) {
-    if (r.lat != null) return Promise.resolve(r);
-    return fetchJSON(VM + 'place/v4?apikey=' + encodeURIComponent(vmKey) + '&refid=' + encodeURIComponent(r.ref))
-      .then(function (p) { return { lat: p.lat, lon: p.lng, name: r.name }; });
-  }
-  function searchOSM(q, near) {
-    var url = NOMINATIM + '?format=jsonv2&limit=6&countrycodes=vn&accept-language=vi&q=' + encodeURIComponent(q);
+    var url = NOMINATIM + '?format=jsonv2&limit=8&countrycodes=vn&accept-language=vi&q=' + encodeURIComponent(q);
     if (near) {
       var d = 0.4; // ưu tiên kết quả gần vị trí hiện tại
       url += '&viewbox=' + (near.lon - d) + ',' + (near.lat + d) + ',' + (near.lon + d) + ',' + (near.lat - d);
@@ -98,93 +76,131 @@
     });
   }
 
+  // ---------- Tìm nhanh quanh đây ----------
+  var CATS = {
+    fuel: ['nwr[amenity=fuel]'],
+    repair: ['nwr[shop~"motorcycle"]', 'nwr[craft~"motorcycle"]'],
+    atm: ['nwr[amenity=atm]', 'nwr[amenity=bank]'],
+    cafe: ['nwr[amenity=cafe]'],
+    food: ['nwr[amenity~"^(restaurant|fast_food)$"]'],
+    parking: ['nwr[amenity~"^(motorcycle_parking|parking)$"]'],
+    hospital: ['nwr[amenity~"^(hospital|clinic)$"]'],
+    toilets: ['nwr[amenity=toilets]']
+  };
+  var CAT_NAME = { fuel: 'Cây xăng', repair: 'Tiệm sửa xe', atm: 'ATM', cafe: 'Quán cà phê', food: 'Quán ăn',
+    parking: 'Bãi gửi xe', hospital: 'Bệnh viện', toilets: 'Nhà vệ sinh' };
+  function nearby(cat, p) {
+    var around = '(around:3000,' + p.lat + ',' + p.lon + ');';
+    var q = '[out:json][timeout:12];(' + CATS[cat].join(around) + around + ');out center tags 60;';
+    return overpass(q).then(function (j) {
+      return (j.elements || []).map(function (e) {
+        var lat = e.lat != null ? e.lat : e.center && e.center.lat;
+        var lon = e.lon != null ? e.lon : e.center && e.center.lon;
+        var t = e.tags || {};
+        var addr = [t['addr:housenumber'], t['addr:street']].filter(Boolean).join(' ') || t.brand || t.operator || '';
+        return { lat: lat, lon: lon, name: t.name || CAT_NAME[cat], addr: addr };
+      }).filter(function (r) { return r.lat != null; })
+        .sort(function (a, b) { return dist(p, a) - dist(p, b); })
+        .slice(0, 12);
+    });
+  }
+
   // ---------- Tìm đường ----------
-  var MOD_ICON = {
-    'uturn': '⤺', 'sharp right': '↘', 'right': '→', 'slight right': '↗',
-    'straight': '↑', 'slight left': '↖', 'left': '←', 'sharp left': '↙'
+  // Ưu tiên Valhalla (có chế độ xe máy, tránh cao tốc), lỗi thì dùng OSRM (đường ô tô).
+  function route(from, to, heading) {
+    return routeValhalla(from, to, heading).catch(function () { return routeOSRM(from, to); });
+  }
+
+  function decode6(str) { // giải mã polyline độ chính xác 6 của Valhalla
+    var i = 0, lat = 0, lon = 0, out = [];
+    while (i < str.length) {
+      var b, s = 0, r = 0;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << s; s += 5; } while (b >= 32);
+      lat += (r & 1) ? ~(r >> 1) : (r >> 1);
+      s = 0; r = 0;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << s; s += 5; } while (b >= 32);
+      lon += (r & 1) ? ~(r >> 1) : (r >> 1);
+      out.push([lat / 1e6, lon / 1e6]);
+    }
+    return out;
+  }
+
+  // Mã hướng rẽ của Valhalla
+  var VT = {
+    1: ['↑', 'Xuất phát'], 2: ['↑', 'Xuất phát'], 3: ['↑', 'Xuất phát'],
+    4: ['⚑', 'Đến nơi'], 5: ['⚑', 'Đến nơi, bên phải'], 6: ['⚑', 'Đến nơi, bên trái'],
+    7: ['↑', 'Đi tiếp'], 8: ['↑', 'Đi tiếp'],
+    9: ['↗', 'Chếch phải'], 10: ['→', 'Rẽ phải'], 11: ['↘', 'Rẽ gắt phải'],
+    12: ['⤻', 'Quay đầu'], 13: ['⤺', 'Quay đầu'],
+    14: ['↙', 'Rẽ gắt trái'], 15: ['←', 'Rẽ trái'], 16: ['↖', 'Chếch trái'],
+    17: ['↑', 'Đi thẳng lên đường dẫn'], 18: ['↗', 'Vào đường dẫn bên phải'], 19: ['↖', 'Vào đường dẫn bên trái'],
+    20: ['↗', 'Ra lối bên phải'], 21: ['↖', 'Ra lối bên trái'],
+    22: ['↑', 'Giữ thẳng'], 23: ['↗', 'Giữ bên phải'], 24: ['↖', 'Giữ bên trái'],
+    25: ['↑', 'Nhập làn'], 26: ['⟳', 'Vào vòng xoay'], 27: ['⟳', 'Ra khỏi vòng xoay'],
+    28: ['⛴', 'Lên phà'], 29: ['⛴', 'Xuống phà'],
+    37: ['↗', 'Nhập làn bên phải'], 38: ['↖', 'Nhập làn bên trái']
   };
-  var MOD_TEXT = {
-    'uturn': 'Quay đầu', 'sharp right': 'Rẽ gắt phải', 'right': 'Rẽ phải', 'slight right': 'Chếch phải',
-    'straight': 'Đi thẳng', 'slight left': 'Chếch trái', 'left': 'Rẽ trái', 'sharp left': 'Rẽ gắt trái'
-  };
+  function routeValhalla(from, to, heading) {
+    var loc0 = { lat: from.lat, lon: from.lon };
+    if (heading != null) { loc0.heading = Math.round(heading); loc0.heading_tolerance = 60; }
+    var req = {
+      locations: [loc0, { lat: to.lat, lon: to.lon }],
+      costing: 'motor_scooter',
+      costing_options: { motor_scooter: { top_speed: 60, use_primary: 0.6, use_hills: 0.5 } },
+      units: 'kilometers', language: 'vi-VN', directions_type: 'maneuvers'
+    };
+    return fetchJSON(VALHALLA + '?json=' + encodeURIComponent(JSON.stringify(req))).then(function (j) {
+      var leg = j.trip && j.trip.legs && j.trip.legs[0];
+      if (!leg) throw new Error('Không có tuyến');
+      var line = decode6(leg.shape);
+      var steps = leg.maneuvers.map(function (m) {
+        var v = VT[m.type] || ['↑', 'Đi tiếp'];
+        var road = (m.street_names && m.street_names[0]) || '';
+        var text = v[1];
+        if (m.type === 26 && m.roundabout_exit_count) text += ', ra lối thứ ' + m.roundabout_exit_count;
+        if (road && m.type !== 4 && m.type !== 5 && m.type !== 6) text += ' vào ' + road;
+        var idx = Math.min(m.begin_shape_index || 0, line.length - 1);
+        return { lat: line[idx][0], lon: line[idx][1], idx: idx, icon: v[0], text: text };
+      });
+      return { line: line, steps: steps, distance: j.trip.summary.length * 1000,
+        duration: j.trip.summary.time, src: 'xe máy' };
+    });
+  }
+
+  var MOD_ICON = { 'uturn': '⤺', 'sharp right': '↘', 'right': '→', 'slight right': '↗',
+    'straight': '↑', 'slight left': '↖', 'left': '←', 'sharp left': '↙' };
+  var MOD_TEXT = { 'uturn': 'Quay đầu', 'sharp right': 'Rẽ gắt phải', 'right': 'Rẽ phải', 'slight right': 'Chếch phải',
+    'straight': 'Đi thẳng', 'slight left': 'Chếch trái', 'left': 'Rẽ trái', 'sharp left': 'Rẽ gắt trái' };
   function stepText(s) {
-    var m = s.maneuver, mod = m.modifier || 'straight', road = s.name || s.ref || '';
-    var t;
+    var m = s.maneuver, mod = m.modifier || 'straight', road = s.name || s.ref || '', t;
     switch (m.type) {
       case 'depart': t = 'Xuất phát'; break;
       case 'arrive': return { icon: '⚑', text: 'Đến nơi' };
       case 'roundabout': case 'rotary':
-        t = 'Vào vòng xoay' + (m.exit ? ', ra lối thứ ' + m.exit : ''); return { icon: '⟳', text: t + (road ? ' → ' + road : '') };
+        return { icon: '⟳', text: 'Vào vòng xoay' + (m.exit ? ', ra lối thứ ' + m.exit : '') + (road ? ' → ' + road : '') };
       case 'exit roundabout': case 'exit rotary': t = 'Ra khỏi vòng xoay'; break;
       case 'fork': t = mod.indexOf('left') >= 0 ? 'Đi nhánh trái' : 'Đi nhánh phải'; break;
       case 'merge': t = 'Nhập làn'; break;
-      case 'on ramp': t = 'Lên cầu/đường dẫn'; break;
-      case 'off ramp': t = 'Xuống đường dẫn'; break;
       case 'end of road': t = MOD_TEXT[mod] + ' ở cuối đường'; break;
       case 'continue': case 'new name': t = mod === 'straight' ? 'Đi tiếp' : MOD_TEXT[mod]; break;
       default: t = MOD_TEXT[mod] || 'Đi tiếp';
     }
     return { icon: MOD_ICON[mod] || '↑', text: t + (road ? ' vào ' + road : '') };
   }
-
-  function route(from, to, heading) {
-    if (!vmKey) return routeOSRM(from, to);
-    return routeVM(from, to, heading).catch(function () { return routeOSRM(from, to); });
-  }
-
-  // Mã hướng rẽ của Vietmap (theo chuẩn GraphHopper mà Vietmap dùng)
-  var VM_SIGN = {
-    '-98': ['⤺', 'Quay đầu'], '-8': ['⤺', 'Quay đầu'], '8': ['⤻', 'Quay đầu'],
-    '-7': ['↖', 'Giữ làn trái'], '7': ['↗', 'Giữ làn phải'],
-    '-3': ['↙', 'Rẽ gắt trái'], '-2': ['←', 'Rẽ trái'], '-1': ['↖', 'Chếch trái'],
-    '0': ['↑', 'Đi tiếp'], '1': ['↗', 'Chếch phải'], '2': ['→', 'Rẽ phải'], '3': ['↘', 'Rẽ gắt phải'],
-    '4': ['⚑', 'Đến nơi'], '5': ['•', 'Qua điểm dừng'],
-    '6': ['⟳', 'Vào vòng xoay'], '-6': ['⟳', 'Ra khỏi vòng xoay']
-  };
-  function routeVM(from, to, heading) {
-    var url = VM + 'route/v4?apikey=' + encodeURIComponent(vmKey) +
-      '&point=' + from.lat + ',' + from.lon + '&point=' + to.lat + ',' + to.lon +
-      '&vehicle=motorcycle&points_encoded=false' +
-      (heading != null ? '&heading=' + Math.round(heading) : '');
-    return fetchJSON(url).then(function (j) {
-      if (j.code !== 'OK' || !j.paths || !j.paths.length) throw new Error(j.code || 'Không có tuyến');
-      var p = j.paths[0];
-      // Tài liệu ghi lẫn [lat,lng] và [lng,lat], nên tự nhận biết: ở Việt Nam vĩ độ < 25, kinh độ > 100
-      var flip = p.points.coordinates ? true : null;
-      var raw = p.points.coordinates || p.points;
-      if (flip === null) flip = raw.length && raw[0][0] > 90;
-      var line = raw.map(function (c) { return flip ? [c[1], c[0]] : [c[0], c[1]]; });
-      var steps = p.instructions.map(function (s, i) {
-        var sg = VM_SIGN[String(s.sign)] || ['↑', 'Đi tiếp'];
-        var road = s.street_name || s.text || '';
-        var idx = Math.min(s.interval ? s.interval[0] : 0, line.length - 1);
-        var text = i === 0 ? 'Xuất phát' : sg[1];
-        if (road && s.sign !== 4) text += ' vào ' + road;
-        return { lat: line[idx][0], lon: line[idx][1], idx: idx, icon: i === 0 ? '↑' : sg[0], text: text };
-      });
-      return { line: line, steps: steps, distance: p.distance, duration: p.time / 1000, src: 'Vietmap · xe máy' };
-    });
-  }
-
   function routeOSRM(from, to) {
-    var url = OSRM + from.lon + ',' + from.lat + ';' + to.lon + ',' + to.lat +
-      '?overview=full&geometries=geojson&steps=true';
+    var url = OSRM + from.lon + ',' + from.lat + ';' + to.lon + ',' + to.lat + '?overview=full&geometries=geojson&steps=true';
     return fetchJSON(url).then(function (j) {
       if (!j.routes || !j.routes.length) throw new Error('Không tìm được đường');
       var r = j.routes[0];
       var line = r.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
-      var steps = [];
-      r.legs[0].steps.forEach(function (s) {
-        var tx = stepText(s), loc = s.maneuver.location;
-        steps.push({ lat: loc[1], lon: loc[0], icon: tx.icon, text: tx.text, type: s.maneuver.type });
-      });
-      // Gắn mỗi bước với vị trí trên tuyến để biết bước nào sắp tới
       var hint = 0;
-      steps.forEach(function (s) {
-        var n = nearestOnLine({ lat: s.lat, lon: s.lon }, line, 0);
-        s.idx = Math.max(n.i, hint); hint = s.idx;
+      var steps = r.legs[0].steps.map(function (s) {
+        var tx = stepText(s), loc = s.maneuver.location;
+        var n = nearestOnLine({ lat: loc[1], lon: loc[0] }, line, 0);
+        hint = Math.max(n.i, hint);
+        return { lat: loc[1], lon: loc[0], idx: hint, icon: tx.icon, text: tx.text };
       });
-      return { line: line, steps: steps, distance: r.distance, duration: r.duration, src: 'OSM' };
+      return { line: line, steps: steps, distance: r.distance, duration: r.duration, src: 'ô tô (dự phòng)' };
     });
   }
 
@@ -214,11 +230,9 @@
         var g = w.geometry.map(function (n) { return [n.lat, n.lon]; });
         for (var i = 0; i < g.length - 1; i++) {
           var d = segDist(p, g[i], g[i + 1]).d;
-          // Ưu tiên đoạn đường cùng hướng đang đi
-          if (heading != null) {
+          if (heading != null) { // ưu tiên đoạn đường cùng hướng đang đi
             var b = bearing({ lat: g[i][0], lon: g[i][1] }, { lat: g[i + 1][0], lon: g[i + 1][1] });
-            var ad = Math.min(angleDiff(b, heading), angleDiff((b + 180) % 360, heading));
-            d += ad / 6;
+            d += Math.min(angleDiff(b, heading), angleDiff((b + 180) % 360, heading)) / 6;
           }
           if (!best || d < best.d) best = { d: d, tags: w.tags };
         }
@@ -232,15 +246,15 @@
 
   // ---------- Camera bắn tốc độ ----------
   function cameras(p, radius) {
-    var q = '[out:json][timeout:15];(node[highway=speed_camera](around:' + radius + ',' + p.lat + ',' + p.lon + ');' +
-      'node["enforcement"="maxspeed"](around:' + radius + ',' + p.lat + ',' + p.lon + '););out;';
+    var a = '(around:' + radius + ',' + p.lat + ',' + p.lon + ');';
+    var q = '[out:json][timeout:15];(node[highway=speed_camera]' + a + 'node["enforcement"="maxspeed"]' + a + ');out;';
     return overpass(q).then(function (j) {
       return (j.elements || []).map(function (n) {
-        return { lat: n.lat, lon: n.lon, limit: parseSpeed(n.tags && n.tags.maxspeed), user: false };
+        return { lat: n.lat, lon: n.lon, limit: parseSpeed(n.tags && n.tags.maxspeed) };
       });
     });
   }
 
   window.Geo = { dist: dist, bearing: bearing, angleDiff: angleDiff, nearestOnLine: nearestOnLine };
-  window.Data = { search: search, resolve: resolve, route: route, speedLimit: speedLimit, cameras: cameras, setKey: setKey, hasKey: hasKey };
+  window.Data = { search: search, nearby: nearby, route: route, speedLimit: speedLimit, cameras: cameras };
 })();
