@@ -272,6 +272,7 @@
     var drag = null, pinch = null, pressTimer = null;
 
     function startDrag(x, y) {
+      cancelAnimationFrame(self._glide); // dừng hiệu ứng trượt theo GPS để ngón tay "nắm" được bản đồ
       drag = { x: x, y: y, c: null, moved: false };
       clearTimeout(pressTimer);
       pressTimer = setTimeout(function () {
@@ -287,12 +288,19 @@
       var dx = x - drag.x, dy = y - drag.y;
       if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 8) {
         drag.moved = true; clearTimeout(pressTimer);
-        if (self.onPan) self.onPan();  // thoát chế độ 3D trước khi kéo
+        if (self.onPan) self.onPan();  // báo cho app: người dùng đang tự xem bản đồ
         drag.c = project(self.center.lat, self.center.lon, self.z);
         drag.x = x; drag.y = y; dx = 0; dy = 0;
       }
       if (drag.moved) {
-        self.center = unproject(drag.c.x - dx, drag.c.y - dy, self.z);
+        var wx = dx, wy = dy;
+        if (self.nav) {
+          // Chế độ 3D: đổi hướng kéo trên màn hình sang hướng trên bản đồ (đã nghiêng 50° và xoay theo hướng đi)
+          var t = self.bearing * Math.PI / 180, sy = dy / 0.64;
+          wx = dx * Math.cos(t) - sy * Math.sin(t);
+          wy = dx * Math.sin(t) + sy * Math.cos(t);
+        }
+        self.center = unproject(drag.c.x - wx, drag.c.y - wy, self.z);
         self.render();
       }
     }

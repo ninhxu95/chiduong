@@ -19,7 +19,8 @@
     use3d: load('use3d', true),
     style: load('mapStyle', 'waze'),
     reports: load('reports', []),
-    headingUp: load('headingUp', true), compass: null, previewing: false
+    headingUp: load('headingUp', true), compass: null, previewing: false,
+    tol: load('speedTol', 3), favs: load('favs', []), routeHaz: []
   };
   // Chuyển camera tự đánh dấu ở bản trước sang dạng báo cáo
   load('userCams', []).forEach(function (c) { S.reports.push({ type: 'camera', lat: c.lat, lon: c.lon, ts: Date.now() }); });
@@ -33,7 +34,10 @@
     accident: { icon: '💥', color: '#ff5a5f', text: 'Tai nạn phía trước', ttl: 2 * H },
     jam:      { icon: '🚗', color: '#ff5a5f', text: 'Kẹt xe phía trước', ttl: 1 * H },
     flood:    { icon: '🌊', color: '#1aa7ec', text: 'Đường ngập nước', ttl: 6 * H },
-    hazard:   { icon: '⚠️', color: '#ffb31a', text: 'Nguy hiểm trên đường', ttl: 6 * H }
+    hazard:   { icon: '⚠️', color: '#ffb31a', text: 'Nguy hiểm trên đường', ttl: 6 * H },
+    // Lấy từ OpenStreetMap, không tự báo cáo được (giống cảnh báo đường của OsmAnd)
+    rail:     { icon: '🚆', color: '#8a63d2', text: 'Đường ngang tàu hỏa', ttl: 0, near: 300 },
+    bump:     { icon: '〰️', color: '#ffb31a', text: 'Gờ giảm tốc', ttl: 0, near: 120, quiet: true }
   };
   function liveReports() {
     var now = Date.now();
@@ -41,7 +45,11 @@
     return S.reports;
   }
   function alertables() {
-    var list = S.osmCams.map(function (c) { return { type: 'camera', lat: c.lat, lon: c.lon, limit: c.limit }; });
+    var osm = S.osmCams.concat(S.routeHaz || []), seen = {}, list = [];
+    osm.forEach(function (c) {
+      var k = c.type + c.lat.toFixed(5) + c.lon.toFixed(5);
+      if (!seen[k]) { seen[k] = 1; list.push({ type: c.type || 'camera', lat: c.lat, lon: c.lon, limit: c.limit }); }
+    });
     return list.concat(liveReports());
   }
   function refreshMarkers() {
@@ -138,7 +146,7 @@
         if (S.speed < 1.5 && Date.now() - lastCompassDraw > 330) {
           lastCompassDraw = Date.now();
           if (map.user) map.user.heading = h;
-          if (S.threeD && S.headingUp) { map.setBearing(h); drawCompass(); }
+          if (S.threeD && S.headingUp && S.follow) { map.setBearing(h); drawCompass(); }
           map.render();
         }
       });
@@ -189,7 +197,7 @@
     var kmh = S.speed * 3.6;
     $('speed').textContent = kmh < 2 ? 0 : Math.max(0, Math.round(kmh + S.offset));
     $('rawSpeed').textContent = kmh < 2 ? 0 : Math.round(kmh);
-    var over = S.limit && kmh > S.limit.limit + 3;
+    var over = S.limit && !S.limit.banned && kmh > S.limit.limit + S.tol;
     $('gauges').classList.toggle('over', !!over);
     if (over && Date.now() - S.lastOverBeep > 4000) { S.lastOverBeep = Date.now(); beep(2, 880); }
   }
@@ -201,8 +209,11 @@
     var at = { lat: S.pos.lat, lon: S.pos.lon };
     Data.speedLimit(at, S.speed > 1.5 ? S.heading : null).then(function (r) {
       S.limit = r; S.limitAt = at; S.limitTime = Date.now();
-      $('limit').textContent = r ? r.limit : '--';
-      $('limitNote').textContent = r ? (r.exact ? 'giới hạn' : 'ước tính') : 'không rõ';
+      if (r && r.banned) { $('limit').textContent = '🚫'; $('limitNote').textContent = 'cấm xe máy'; }
+      else {
+        $('limit').textContent = r ? r.limit : '--';
+        $('limitNote').textContent = !r ? 'không rõ' : r.exact ? 'giới hạn' : (r.urban ? 'ước tính KDC' : 'ước tính');
+      }
       showSpeed();
     }).catch(function () { S.limitTime = Date.now() - 15000; })
       .then(function () { S.limitBusy = false; });
@@ -223,7 +234,8 @@
     var best = null, all = alertables();
     for (var i = 0; i < all.length; i++) {
       var d = Geo.dist(S.pos, all[i]);
-      if (d > warnFar) continue;
+      var near = TYPES[all[i].type].near; // gờ giảm tốc, đường ray: chỉ báo khi đã gần
+      if (d > (near ? Math.min(near, warnFar) : warnFar)) continue;
       var ahead = S.heading == null || S.speed < 1.5 || d < 40 ||
         Geo.angleDiff(Geo.bearing(S.pos, all[i]), S.heading) < 50;
       if (ahead && (!best || d < best.d)) best = { d: d, a: all[i], key: all[i].type + all[i].lat.toFixed(5) + all[i].lon.toFixed(5) };
@@ -237,6 +249,7 @@
     $('alertText').textContent = t.text + (best.a.limit ? ' · ' + best.a.limit : '');
     $('alertDist').textContent = fmtDist(best.d);
     var w = S.warned[best.key] || 0;
+    if (t.quiet) { if (w < 1) { beep(1, 700); S.warned[best.key] = 2; } return; }
     if (w < 1) { beep(2, 1150); S.warned[best.key] = 1; }
     if (best.d < warnNear && w < 2) { beep(3, 1400); S.warned[best.key] = 2; }
     if (best.a.limit && kmh > best.a.limit && Date.now() - S.lastOverBeep > 3000) { S.lastOverBeep = Date.now(); beep(2, 880); }
@@ -288,6 +301,15 @@
     showSpeed();
   }
   setOffset(S.offset);
+  // Ngưỡng báo vượt tốc (như "dung sai tốc độ" của OsmAnd): 0 đến 10 km/h
+  function setTol(v) {
+    S.tol = Math.max(0, Math.min(10, v)); save('speedTol', S.tol);
+    $('tolVal').textContent = '+' + S.tol + ' km/h';
+    showSpeed();
+  }
+  setTol(S.tol);
+  $('tolPlus').addEventListener('click', function () { setTol(S.tol + 1); });
+  $('tolMinus').addEventListener('click', function () { setTol(S.tol - 1); });
   $('optBeep').checked = S.beep;
   $('btnSet').addEventListener('click', function () { openSheet('sheetSet'); });
   $('speedBox').addEventListener('click', function () { openSheet('sheetSet'); });
@@ -389,10 +411,64 @@
   map.onLongPress = function (lat, lon) {
     if (confirm('Đi đến điểm này?')) goTo({ lat: lat, lon: lon, name: 'Điểm đã chọn' });
   };
+
+  // ---------- Địa điểm đã lưu (như dấu trang của Organic Maps) ----------
+  function favIcon(name) {
+    var n = norm(name);
+    if (/^nha\b|nha rieng|home/.test(n)) return '🏠';
+    if (/cong ty|cty|van phong|co quan|benh vien|work/.test(n)) return '🏢';
+    return '⭐';
+  }
+  function findFav(p) {
+    for (var i = 0; i < S.favs.length; i++) if (Geo.dist(S.favs[i], p) < 30) return i;
+    return -1;
+  }
+  function renderFavs() {
+    var box = $('chips');
+    Array.prototype.forEach.call(box.querySelectorAll('.fav'), function (el) { box.removeChild(el); });
+    S.favs.slice().reverse().forEach(function (f) {
+      var b = document.createElement('button');
+      b.className = 'chip fav';
+      b.textContent = favIcon(f.name) + ' ' + f.name;
+      b.addEventListener('click', function () { $('results').innerHTML = ''; goTo(f); });
+      box.insertBefore(b, box.firstChild);
+    });
+    if (S.dest) $('btnFav').textContent = findFav(S.dest) >= 0 ? '★' : '☆';
+  }
+  renderFavs();
+  $('btnFav').addEventListener('click', function () {
+    if (!S.dest) return;
+    var i = findFav(S.dest);
+    if (i >= 0) {
+      if (!confirm('Bỏ lưu "' + S.favs[i].name + '"?')) return;
+      S.favs.splice(i, 1);
+    } else {
+      var name = prompt('Lưu địa điểm với tên (vd: Nhà, Công ty):', S.dest.name || '');
+      if (!name) return;
+      S.favs.push({ name: name.trim(), lat: S.dest.lat, lon: S.dest.lon, addr: S.dest.addr || '' });
+      toast('Đã lưu ' + favIcon(name) + ' ' + name);
+    }
+    save('favs', S.favs); renderFavs();
+  });
+  // Người dùng tự kéo bản đồ: giữ nguyên chế độ 3D/góc xoay như Google Maps, Waze.
+  // Đang dẫn đường thì sau 10 giây không chạm sẽ tự quay về vị trí xe.
+  var recenterTimer = null;
   map.onPan = function () {
-    S.follow = false; S.panned = true; S.threeD = false; map.setNav(false);
+    S.follow = false; S.panned = true;
     $('btnCenter').classList.add('off');
+    clearTimeout(recenterTimer);
+    if (S.nav && !S.previewing) recenterTimer = setTimeout(recenter, 10000);
   };
+  function recenter() {
+    clearTimeout(recenterTimer);
+    if (S.previewing) { startNav(); return; }
+    S.follow = true; $('btnCenter').classList.remove('off');
+    if (S.pos) { map.setView(S.pos.lat, S.pos.lon, Math.max(map.z, 16)); updateView(); }
+  }
+  // Chạm lại vào bản đồ thì tính lại 10 giây
+  $('map').addEventListener('touchend', function () {
+    if (!S.follow && S.nav && !S.previewing) { clearTimeout(recenterTimer); recenterTimer = setTimeout(recenter, 10000); }
+  });
 
   // ---------- Dẫn đường ----------
   function goTo(dest) {
@@ -411,7 +487,18 @@
       $('turn').classList.remove('hidden');
       $('searchRow').classList.add('hidden'); $('chips').classList.add('hidden');
       $('btnStop').classList.remove('hidden'); $('btnSet').classList.add('hidden');
+      $('btnFav').classList.remove('hidden'); renderFavs();
       $('toast').classList.add('hidden');
+      // Quét camera, đường ngang tàu hỏa, gờ giảm tốc dọc toàn tuyến (như OsmAnd)
+      Data.alongRoute(nav.line).then(function (list) {
+        if (!list || S.nav !== nav) return;
+        S.routeHaz = list; refreshMarkers();
+        if (!preview) return;
+        var cam = 0, rail = 0;
+        list.forEach(function (h) { if (h.type === 'camera') cam++; else if (h.type === 'rail') rail++; });
+        liveReports().forEach(function (r) { if (r.type === 'camera' && Geo.nearestOnLine(r, nav.line, 0).d < 40) cam++; });
+        toast('Trên tuyến: ' + cam + ' camera 📷 · ' + rail + ' đường ngang tàu 🚆', 4000);
+      }).catch(function () {});
       if (preview) {
         // Xem trước toàn tuyến, chờ bấm "Bắt đầu đi" (hoặc tự bắt đầu khi xe chạy)
         toast('Tuyến đường cho ' + nav.src, 2500);
@@ -433,7 +520,8 @@
   }
   $('btnGo').addEventListener('click', startNav);
   function stopNav() {
-    S.previewing = false; $('btnGo').classList.add('hidden');
+    S.previewing = false; $('btnGo').classList.add('hidden'); $('btnFav').classList.add('hidden');
+    S.routeHaz = []; refreshMarkers();
     S.nav = null; S.dest = null; map.route = null; map.dest = null; map.render();
     $('turn').classList.add('hidden');
     $('searchRow').classList.remove('hidden'); $('chips').classList.remove('hidden');
@@ -466,17 +554,18 @@
     $('turnIcon').textContent = next.icon;
     $('turnDist').textContent = fmtDist(dNext);
     $('turnName').textContent = next.text;
+    // Rẽ kế tiếp nếu ở gần (như Organic Maps/OsmAnd hiện "Sau đó…")
+    var k = nav.steps.indexOf(next), then = nav.steps[k + 1];
+    var gap = then ? S.cum[then.idx] - S.cum[next.idx] : Infinity;
+    if (then && gap < 400) { $('turnThen').textContent = 'Sau đó ' + fmtDist(gap) + ': ' + then.icon + ' ' + then.text; $('turnThen').classList.remove('hidden'); }
+    else $('turnThen').classList.add('hidden');
     var secs = nav.duration * (remain / total);
     $('eta').textContent = fmtTime(new Date(Date.now() + secs * 1000));
     $('remain').textContent = Math.max(1, Math.round(secs / 60)) + ' phút · ' + fmtDist(remain);
   }
 
   // ---------- Nút khác ----------
-  $('btnCenter').addEventListener('click', function () {
-    if (S.previewing) { startNav(); return; }
-    S.follow = true; $('btnCenter').classList.remove('off');
-    if (S.pos) { map.setView(S.pos.lat, S.pos.lon, Math.max(map.z, 16)); updateView(); }
-  });
+  $('btnCenter').addEventListener('click', recenter);
   // La bàn: chạm để đổi giữa "xoay theo hướng đi" và "hướng Bắc luôn ở trên"
   $('btnCompass').addEventListener('click', function () {
     S.headingUp = !S.headingUp; save('headingUp', S.headingUp);

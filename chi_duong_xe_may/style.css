@@ -124,7 +124,7 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   box-shadow: var(--shadow); font-size: 22px; font-weight: 700; padding: 0;
 }
 #btnCenter { color: var(--wzDeep); -webkit-transform: rotate(-45deg); transform: rotate(-45deg); }
-#btnCenter.off { color: var(--muted); }
+#btnCenter.off { color: #fff; background: var(--wzDeep); box-shadow: 0 0 0 5px rgba(26,167,236,.3), var(--shadow); }
 
 /* ===== Dưới ===== */
 #bottom { position: absolute; left: 10px; right: 10px; bottom: calc(52px + var(--safe-b)); z-index: 10; }
@@ -243,3 +243,12 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 }
 @media print { #start, #side, .sheet, #searchRow, #chips { display: none; } }
 @media (max-height: 700px) { #zIn, #zOut { display: none; } }
+/* Rẽ kế tiếp, địa điểm đã lưu, ngưỡng vượt tốc */
+#turnThen {
+  margin-top: 6px; padding: 4px 10px; border-radius: 10px; background: rgba(0,0,0,.18);
+  font-size: 14px; font-weight: 700; display: inline-block;
+}
+#tolVal { flex: 1; text-align: center; font-family: var(--round); font-size: 28px; }
+.chip.fav { background: #fff7e0; box-shadow: 0 2px 8px rgba(255,159,26,.35); }
+#btnFav { font-size: 24px; color: var(--orange); }
+.sheet { max-height: 80vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }

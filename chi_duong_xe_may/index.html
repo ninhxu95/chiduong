@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Chỉ Đường">
 <meta name="theme-color" content="#eaf6fd">
 <title>Chỉ Đường Xe Máy</title>
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -40,6 +40,7 @@
     <div id="turnText">
       <div id="turnDist">—</div>
       <div id="turnName">—</div>
+      <div id="turnThen" class="hidden"></div>
     </div>
   </div>
   <div id="alert" class="hidden">
@@ -75,6 +76,7 @@
       <div id="remain">Chạm ô tìm kiếm để chọn nơi đến</div>
     </div>
     <button id="btnSet" class="pill" aria-label="Cài đặt">⚙</button>
+    <button id="btnFav" class="pill hidden" aria-label="Lưu địa điểm">☆</button>
     <button id="btnGo" class="pill go hidden">Bắt đầu đi</button>
     <button id="btnStop" class="pill stop hidden">Dừng</button>
   </div>
@@ -104,6 +106,7 @@
   </div>
   <label class="row"><input type="checkbox" id="opt3d" checked> Bản đồ 3D xoay theo hướng đi khi dẫn đường</label>
   <p class="note"><b>Chi tiết</b> hiện số nhà, hẻm, cửa hàng rõ nhất khi phóng to tối đa.</p>
+  <p class="note">Trên bản đồ: 📷 camera · 🚆 đường ngang tàu hỏa · 〰️ gờ giảm tốc (từ OpenStreetMap) và các báo cáo của bạn.</p>
 </div>
 
 <!-- ===== Bảng trượt: cài đặt ===== -->
@@ -116,8 +119,14 @@
     <button id="offPlus" class="pill">+</button>
   </div>
   <p class="note">GPS đo: <b id="rawSpeed">0</b> km/h. Cảnh báo quá tốc độ vẫn dùng tốc độ thực GPS. <a id="offReset">Đặt lại 0</a></p>
+  <div class="label" style="margin-top:14px">Báo vượt tốc khi chạy quá giới hạn</div>
+  <div class="stepper">
+    <button id="tolMinus" class="pill">−</button>
+    <div id="tolVal">+3 km/h</div>
+    <button id="tolPlus" class="pill">+</button>
+  </div>
   <label class="row"><input type="checkbox" id="optBeep" checked> Âm bíp cảnh báo</label>
-  <p class="note">Phiên bản 10</p>
+  <p class="note">Phiên bản 12</p>
 </div>
 
 <div id="toast" class="hidden"></div>
@@ -136,8 +145,8 @@
   </div>
 </div>
 
-<script src="map.js?v=10"></script>
-<script src="data.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="map.js?v=12"></script>
+<script src="data.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

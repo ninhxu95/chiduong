@@ -272,27 +272,37 @@
   }
 
   // ---------- Giới hạn tốc độ ----------
-  // Ước tính theo Thông tư 38/2024/TT-BGTVT cho xe mô tô khi OSM không có dữ liệu:
-  // trong khu dân cư, đường đôi/một chiều ≥2 làn: 60; đường hai chiều/một chiều 1 làn: 50.
+  // Như OsmAnd: ưu tiên biển ghi trên đường (maxspeed). Không có thì ước tính theo
+  // Thông tư 38/2024/TT-BGTVT cho xe mô tô, có phân biệt trong/ngoài khu đông dân cư:
+  //   trong khu dân cư:  đường đôi/một chiều ≥2 làn 60, đường hai chiều/một chiều 1 làn 50
+  //   ngoài khu dân cư:  đường đôi/một chiều ≥2 làn 70, đường hai chiều/một chiều 1 làn 60
+  // "Khu dân cư" được đoán theo vùng dân cư/thương mại và mật độ nhà trên OpenStreetMap.
   function parseSpeed(v) {
     if (!v) return null;
     var n = parseInt(v, 10);
     if (isNaN(n)) return null;
     return /mph/.test(v) ? Math.round(n * 1.609) : n;
   }
-  function estimate(tags) {
+  function estimate(tags, urban) {
     var lanes = parseInt(tags.lanes || '0', 10);
     var divided = tags.oneway === 'yes' && (lanes >= 2 || /trunk|primary/.test(tags.highway));
     if (tags.dual_carriageway === 'yes') divided = true;
-    return divided ? 60 : 50;
+    if (/residential|living_street|service/.test(tags.highway)) urban = true; // đường trong khu dân cư
+    if (urban) return divided ? 60 : 50;
+    return divided ? 70 : 60;
   }
   var SKIP = /footway|path|cycleway|steps|pedestrian|service|track|construction|proposed|platform/;
 
   function speedLimit(p, heading) {
-    var q = '[out:json][timeout:8];way(around:30,' + p.lat + ',' + p.lon + ')[highway];out tags geom;';
+    var at = p.lat + ',' + p.lon;
+    var q = '[out:json][timeout:10];way(around:30,' + at + ')[highway];out tags geom;' +
+      'way(around:120,' + at + ')[building];out count;' +
+      'way(around:150,' + at + ')[landuse~"^(residential|commercial|retail)$"];out count;' +
+      'is_in(' + at + ')->.a;area.a[place~"^(city|town|suburb|quarter|neighbourhood)$"];out count;';
     return overpass(q).then(function (j) {
-      var best = null;
+      var best = null, counts = [];
       (j.elements || []).forEach(function (w) {
+        if (w.type === 'count') { counts.push(+(w.tags && w.tags.total) || 0); return; }
         if (!w.geometry || SKIP.test(w.tags.highway)) return;
         var g = w.geometry.map(function (n) { return [n.lat, n.lon]; });
         for (var i = 0; i < g.length - 1; i++) {
@@ -305,23 +315,46 @@
         }
       });
       if (!best) return null;
+      // counts: [số nhà trong 120 m, số vùng dân cư/thương mại, số vùng đô thị chứa điểm]
+      var urban = (counts[0] || 0) >= 12 || (counts[1] || 0) > 0 || (counts[2] || 0) > 0;
       var t = best.tags;
+      if (t.highway === 'motorway') return { limit: 0, exact: true, road: t.name || t.ref || '', banned: true };
       var v = parseSpeed(t['maxspeed:motorcycle']) || parseSpeed(t.maxspeed);
-      return { limit: v || estimate(t), exact: !!v, road: t.name || t.ref || '' };
+      return { limit: v || estimate(t, urban), exact: !!v, urban: urban, road: t.name || t.ref || '' };
     });
   }
 
-  // ---------- Camera bắn tốc độ ----------
+  // ---------- Camera và chướng ngại trên đường (như cảnh báo của OsmAnd) ----------
+  function hazardQuery(area) {
+    return '[out:json][timeout:20];(' +
+      'node[highway=speed_camera]' + area + 'node["enforcement"="maxspeed"]' + area +
+      'node[railway=level_crossing]' + area +
+      'node[traffic_calming~"^(bump|hump|table|cushion)$"]' + area + ');out;';
+  }
+  function parseHazards(j) {
+    return (j.elements || []).map(function (n) {
+      var t = n.tags || {};
+      var type = t.railway === 'level_crossing' ? 'rail' : t.traffic_calming ? 'bump' : 'camera';
+      return { type: type, lat: n.lat, lon: n.lon, limit: parseSpeed(t.maxspeed) };
+    });
+  }
   function cameras(p, radius) {
-    var a = '(around:' + radius + ',' + p.lat + ',' + p.lon + ');';
-    var q = '[out:json][timeout:15];(node[highway=speed_camera]' + a + 'node["enforcement"="maxspeed"]' + a + ');out;';
-    return overpass(q).then(function (j) {
-      return (j.elements || []).map(function (n) {
-        return { lat: n.lat, lon: n.lon, limit: parseSpeed(n.tags && n.tags.maxspeed) };
-      });
+    return overpass(hazardQuery('(around:' + radius + ',' + p.lat + ',' + p.lon + ');')).then(parseHazards);
+  }
+  // Quét dọc toàn tuyến (tuyến dưới ~150 km), giữ lại điểm nằm sát tuyến trong 40 m
+  function alongRoute(line) {
+    var minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+    line.forEach(function (q) {
+      minLat = Math.min(minLat, q[0]); maxLat = Math.max(maxLat, q[0]);
+      minLon = Math.min(minLon, q[1]); maxLon = Math.max(maxLon, q[1]);
+    });
+    if ((maxLat - minLat) * (maxLon - minLon) > 1.5) return Promise.resolve(null);
+    var box = '(' + (minLat - 0.005) + ',' + (minLon - 0.005) + ',' + (maxLat + 0.005) + ',' + (maxLon + 0.005) + ');';
+    return overpass(hazardQuery(box)).then(function (j) {
+      return parseHazards(j).filter(function (h) { return nearestOnLine(h, line, 0).d < 40; });
     });
   }
 
   window.Geo = { dist: dist, bearing: bearing, angleDiff: angleDiff, nearestOnLine: nearestOnLine };
-  window.Data = { search: search, nearby: nearby, route: route, speedLimit: speedLimit, cameras: cameras };
+  window.Data = { search: search, nearby: nearby, route: route, speedLimit: speedLimit, cameras: cameras, alongRoute: alongRoute };
 })();
