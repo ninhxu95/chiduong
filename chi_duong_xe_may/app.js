@@ -18,7 +18,8 @@
     beep: load('beepOn', true),
     use3d: load('use3d', true),
     style: load('mapStyle', 'waze'),
-    reports: load('reports', [])
+    reports: load('reports', []),
+    headingUp: load('headingUp', true), compass: null, previewing: false
   };
   // Chuyển camera tự đánh dấu ở bản trước sang dạng báo cáo
   load('userCams', []).forEach(function (c) { S.reports.push({ type: 'camera', lat: c.lat, lon: c.lon, ts: Date.now() }); });
@@ -92,6 +93,7 @@
   refreshMarkers();
   $('btnStart').addEventListener('click', function () {
     unlockAudio();
+    startCompass(); // iOS chỉ cho xin quyền la bàn ngay trong lần chạm này
     $('start').classList.add('hidden');
     if (!navigator.geolocation) { toast('Máy không hỗ trợ GPS'); return; }
     navigator.geolocation.watchPosition(onPos, function (err) {
@@ -113,7 +115,8 @@
     var first = !S.pos;
     S.pos = pos;
 
-    map.user = { lat: pos.lat, lon: pos.lon, heading: S.speed > 1 ? S.heading : null };
+    map.user = { lat: pos.lat, lon: pos.lon, heading: viewHeading() };
+    if (S.previewing && S.speed * 3.6 > 8) startNav(); // đang xem trước mà xe đã chạy thì tự bắt đầu
     updateView(first);
     showSpeed();
     checkLimit();
@@ -121,16 +124,62 @@
     if (S.nav) updateNav();
   }
 
+  // ---------- La bàn: giữ bản đồ xoay theo hướng xe cả khi đứng yên ----------
+  var lastCompassDraw = 0;
+  function startCompass() {
+    function listen() {
+      window.addEventListener('deviceorientation', function (e) {
+        var h = null;
+        if (e.webkitCompassHeading != null) h = e.webkitCompassHeading;  // iOS
+        else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360; // Android
+        if (h == null || isNaN(h)) return;
+        S.compass = h;
+        // Đứng yên hoặc đi chậm: xoay bản đồ theo la bàn (tối đa ~3 lần/giây)
+        if (S.speed < 1.5 && Date.now() - lastCompassDraw > 330) {
+          lastCompassDraw = Date.now();
+          if (map.user) map.user.heading = h;
+          if (S.threeD && S.headingUp) { map.setBearing(h); drawCompass(); }
+          map.render();
+        }
+      });
+    }
+    var DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === 'function') {
+      DOE.requestPermission().then(function (s) { if (s === 'granted') listen(); }).catch(function () {});
+    } else if (DOE) listen();
+  }
+
+  // Hướng dùng để xoay bản đồ: GPS khi đang chạy, la bàn khi đứng yên,
+  // hướng của tuyến đường khi chưa có cả hai (lúc vừa bấm "Bắt đầu đi")
+  function viewHeading() {
+    if (S.speed > 1.5 && S.heading != null) return S.heading;
+    if (S.compass != null) return S.compass;
+    if (S.nav && S.pos) {
+      var line = S.nav.line, n = Geo.nearestOnLine(S.pos, line, S.hint);
+      var j = Math.min(line.length - 1, n.i + 3);
+      if (j > n.i) return Geo.bearing({ lat: line[n.i][0], lon: line[n.i][1] }, { lat: line[j][0], lon: line[j][1] });
+    }
+    return S.heading;
+  }
+  function drawCompass() {
+    var t = 'rotate(' + (-map.bearing) + 'deg)';
+    $('compassNeedle').style.webkitTransform = t; $('compassNeedle').style.transform = t;
+  }
+
   // Chế độ xem: 3D xoay theo hướng khi đang đi/dẫn đường, phẳng khi đứng yên hoặc tự kéo bản đồ
   function updateView(first) {
     if (!S.pos) return;
-    if (!S.follow) { map.render(); return; }
+    if (!S.follow || S.previewing) { map.render(); return; }
     var kmh = S.speed * 3.6;
     if (S.use3d && (S.nav || kmh > 8)) S.threeD = true;
     else if (!S.nav && kmh < 3) S.threeD = false;
     if (!S.use3d) S.threeD = false;
     if (S.threeD !== map.nav) { map.setNav(S.threeD); if (S.threeD) map.z = 17; }
-    if (S.threeD && S.heading != null) map.setBearing(S.heading);
+    if (S.threeD) {
+      var h = viewHeading();
+      if (S.headingUp && h != null) map.setBearing(h); else map.setBearing(0);
+    }
+    drawCompass();
     if (first) map.setView(S.pos.lat, S.pos.lon, 17);
     else map.glideTo(S.pos.lat, S.pos.lon, 900);
   }
@@ -364,14 +413,27 @@
       $('btnStop').classList.remove('hidden'); $('btnSet').classList.add('hidden');
       $('toast').classList.add('hidden');
       if (preview) {
+        // Xem trước toàn tuyến, chờ bấm "Bắt đầu đi" (hoặc tự bắt đầu khi xe chạy)
         toast('Tuyến đường cho ' + nav.src, 2500);
-        S.follow = false; map.setNav(false); map.fitBounds(nav.line);
-        setTimeout(function () { S.follow = true; map.z = Math.max(map.z, 16); $('btnCenter').classList.remove('off'); updateView(); }, 3000);
+        S.previewing = true; S.follow = false; S.threeD = false;
+        map.setNav(false); map.fitBounds(nav.line);
+        $('btnGo').classList.remove('hidden');
       }
       updateNav();
     }).catch(function () { toast('Không tìm được đường. Kiểm tra mạng rồi thử lại.', 3500); });
   }
+  // Vào chế độ dẫn đường kiểu Waze: nghiêng 3D, xoay theo hướng xe, phóng to quanh vị trí
+  function startNav() {
+    S.previewing = false; S.follow = true;
+    $('btnGo').classList.add('hidden'); $('btnCenter').classList.remove('off');
+    if (!S.pos) return;
+    map.z = 17;
+    map.setView(S.pos.lat, S.pos.lon);
+    updateView();
+  }
+  $('btnGo').addEventListener('click', startNav);
   function stopNav() {
+    S.previewing = false; $('btnGo').classList.add('hidden');
     S.nav = null; S.dest = null; map.route = null; map.dest = null; map.render();
     $('turn').classList.add('hidden');
     $('searchRow').classList.remove('hidden'); $('chips').classList.remove('hidden');
@@ -411,8 +473,15 @@
 
   // ---------- Nút khác ----------
   $('btnCenter').addEventListener('click', function () {
+    if (S.previewing) { startNav(); return; }
     S.follow = true; $('btnCenter').classList.remove('off');
     if (S.pos) { map.setView(S.pos.lat, S.pos.lon, Math.max(map.z, 16)); updateView(); }
+  });
+  // La bàn: chạm để đổi giữa "xoay theo hướng đi" và "hướng Bắc luôn ở trên"
+  $('btnCompass').addEventListener('click', function () {
+    S.headingUp = !S.headingUp; save('headingUp', S.headingUp);
+    toast(S.headingUp ? 'Bản đồ xoay theo hướng đi' : 'Hướng Bắc luôn ở trên', 1500);
+    updateView(); drawCompass();
   });
   $('zIn').addEventListener('click', function () { map.zoomBy(1); });
   $('zOut').addEventListener('click', function () { map.zoomBy(-1); });

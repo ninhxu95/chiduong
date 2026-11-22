@@ -78,10 +78,25 @@
     return { lat: lat, lon: lon, name: 'Tọa độ ' + lat.toFixed(5) + ', ' + lon.toFixed(5), addr: 'Điểm đã dán' };
   }
 
+  // Lấy tên địa điểm từ link Google Maps dạng dài: /maps/place/Tên/... hoặc ?q=Tên / ?query=Tên
+  function nameFromLink(q) {
+    var m = q.match(/\/maps\/place\/([^\/@?]+)/) || q.match(/[?&](?:q|query|destination)=([^&#]+)/);
+    if (!m) return '';
+    try { return decodeURIComponent(m[1].replace(/\+/g, ' ')).trim(); } catch (e) { return ''; }
+  }
+
   function search(q, near) {
     var c = parseCoords(q);
     if (c) return Promise.resolve([c]);
-    if (/goo\.gl|maps\.app/.test(q)) return Promise.reject(new Error('shortlink'));
+    if (/https?:\/\/|goo\.gl|maps\.app/.test(q)) {
+      // Link dài có tên địa điểm thì tìm theo tên
+      var nm = nameFromLink(q);
+      if (nm) return search(nm, near);
+      // Đoạn chia sẻ từ app Google Maps thường có tên + địa chỉ + link rút gọn: bỏ link, tìm theo phần chữ
+      var text = q.replace(/https?:\/\/\S+/g, ' ').replace(/\S*(goo\.gl|maps\.app)\S*/g, ' ').replace(/\s+/g, ' ').trim();
+      if (text.length >= 3) return search(text, near);
+      return Promise.reject(new Error('shortlink'));
+    }
 
     var tasks = [
       searchNominatim(q, near, true).then(function (l) { return l.length || !near ? l : searchNominatim(q, near, false); }),

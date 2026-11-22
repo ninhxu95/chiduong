@@ -116,7 +116,7 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 
 /* ===== Bên phải ===== */
 #side {
-  position: absolute; right: 10px; top: 42%; z-index: 9;
+  position: absolute; right: 10px; top: 30%; z-index: 9;
   display: flex; flex-direction: column; gap: 8px;
 }
 .round {
@@ -163,6 +163,15 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   height: 46px; min-width: 46px; padding: 0 14px;
 }
 .pill.stop { background: var(--red); color: #fff; font-size: 16px; }
+.pill.go { background: var(--wzDeep); color: #fff; font-size: 17px; padding: 0 18px; }
+/* La bàn: kim đỏ chỉ hướng Bắc, xoay theo bản đồ */
+#compassNeedle {
+  position: relative; display: block; width: 14px; height: 34px; margin: 0 auto;
+  -webkit-transition: -webkit-transform .9s linear; transition: transform .9s linear;
+}
+#compassNeedle i { position: absolute; left: 0; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; }
+#compassNeedle .n { top: 0; border-bottom: 17px solid var(--red); }
+#compassNeedle .s { bottom: 0; border-top: 17px solid #c9d3db; }
 
 /* ===== Bảng trượt ===== */
 .sheet {
@@ -233,3 +242,4 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   #limit { font-size: 20px; }
 }
 @media print { #start, #side, .sheet, #searchRow, #chips { display: none; } }
+@media (max-height: 700px) { #zIn, #zOut { display: none; } }

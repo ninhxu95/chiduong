@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Chỉ Đường">
 <meta name="theme-color" content="#eaf6fd">
 <title>Chỉ Đường Xe Máy</title>
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -51,6 +51,7 @@
 
 <!-- ===== Nút bên phải ===== -->
 <div id="side">
+  <button id="btnCompass" class="round" aria-label="La bàn"><span id="compassNeedle"><i class="n"></i><i class="s"></i></span></button>
   <button id="btnLayers" class="round" aria-label="Kiểu bản đồ">🗺️</button>
   <button id="zIn" class="round">+</button>
   <button id="zOut" class="round">−</button>
@@ -74,6 +75,7 @@
       <div id="remain">Chạm ô tìm kiếm để chọn nơi đến</div>
     </div>
     <button id="btnSet" class="pill" aria-label="Cài đặt">⚙</button>
+    <button id="btnGo" class="pill go hidden">Bắt đầu đi</button>
     <button id="btnStop" class="pill stop hidden">Dừng</button>
   </div>
 </div>
@@ -115,6 +117,7 @@
   </div>
   <p class="note">GPS đo: <b id="rawSpeed">0</b> km/h. Cảnh báo quá tốc độ vẫn dùng tốc độ thực GPS. <a id="offReset">Đặt lại 0</a></p>
   <label class="row"><input type="checkbox" id="optBeep" checked> Âm bíp cảnh báo</label>
+  <p class="note">Phiên bản 10</p>
 </div>
 
 <div id="toast" class="hidden"></div>
@@ -133,8 +136,8 @@
   </div>
 </div>
 
-<script src="map.js?v=8"></script>
-<script src="data.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="map.js?v=10"></script>
+<script src="data.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
