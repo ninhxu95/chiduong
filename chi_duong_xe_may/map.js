@@ -8,19 +8,16 @@
   var MIN_Z = 3;
   var SUBS = ['a', 'b', 'c', 'd'];
 
-  // Kiểu bản đồ: mỗi kiểu có một hoặc nhiều lớp ảnh chồng lên nhau
+  // Kiểu bản đồ: mỗi kiểu có một hoặc nhiều lớp ảnh chồng lên nhau.
+  // Chỉ dùng nguồn không cần khóa API (CARTO đã bắt buộc khóa nên bỏ).
+  var ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+  function esri(name) { return function (z, x, y) { return ESRI + name + '/MapServer/tile/' + z + '/' + y + '/' + x; }; }
+  function osm(z, x, y) { return 'https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png'; }
   var STYLES = {
-    waze: { maxZ: 19, layers: [function (z, x, y) {
-      return 'https://' + SUBS[(x + y) % 4] + '.basemaps.cartocdn.com/rastertiles/voyager/' + z + '/' + x + '/' + y + '@2x.png';
-    }], attr: '© OpenStreetMap © CARTO' },
-    detail: { maxZ: 19, layers: [function (z, x, y) {
-      return 'https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png';
-    }], attr: '© OpenStreetMap' },
-    sat: { maxZ: 19, layers: [function (z, x, y) {
-      return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/' + z + '/' + y + '/' + x;
-    }, function (z, x, y) {
-      return 'https://' + SUBS[(x + y) % 4] + '.basemaps.cartocdn.com/rastertiles/voyager_only_labels/' + z + '/' + x + '/' + y + '@2x.png';
-    }], attr: '© Esri © OpenStreetMap © CARTO' }
+    waze: { maxZ: 19, layers: [esri('World_Street_Map')], attr: '© Esri © OpenStreetMap' },
+    detail: { maxZ: 19, layers: [osm], attr: '© OpenStreetMap' },
+    sat: { maxZ: 19, layers: [esri('World_Imagery'), esri('Reference/World_Transportation'),
+      esri('Reference/World_Boundaries_and_Places')], attr: '© Esri' }
   };
 
   function project(lat, lon, z) {
@@ -37,8 +34,8 @@
 
   function TileMap(el) {
     this.el = el;
-    this.z = 16;
-    this.center = { lat: 10.7769, lon: 106.7009 };
+    this.z = 6;
+    this.center = { lat: 16.0, lon: 106.0 }; // giữa Việt Nam, sẽ thay bằng GPS
     this.style = 'waze';
     this.nav = false;        // true = nghiêng 3D, xoay theo hướng đi
     this.bearing = 0;        // độ, cộng dồn (không quấn 0–360) để xoay mượt
@@ -202,6 +199,7 @@
             img = document.createElement('img');
             img.style.zIndex = L;
             img.src = st.layers[L](z, ((tx % n) + n) % n, ty);
+            if (L === 0) img.onerror = (function (im, zz, xx, yy) { return function () { im.onerror = null; im.src = osm(zz, xx, yy); }; })(img, z, ((tx % n) + n) % n, ty);
             this.tileLayer.appendChild(img);
             this.tiles[key] = img;
           }

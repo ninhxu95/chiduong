@@ -295,12 +295,19 @@
     $('q').blur();
     var my = ++seq;
     message('Đang tìm…');
-    Data.search(q, S.pos).then(function (list) {
+    // Chưa có GPS thì lấy tâm bản đồ đang xem để ưu tiên khu vực
+    var near = S.pos || (S.panned ? map.center : null);
+    Data.search(q, near).then(function (list) {
       if (my !== seq) return;
       var all = recentMatches(q).slice(0, 2).concat(list);
-      if (!all.length) { message('Không tìm thấy. Thử gõ cụ thể hơn, ví dụ thêm tên quận.'); return; }
-      renderList(all);
-    }).catch(function () { if (my === seq) message('Lỗi mạng, thử lại.'); });
+      if (!all.length) { message('Không tìm thấy. Thử thêm tên phường/quận, hoặc dán tọa độ từ Google Maps.'); return; }
+      renderList(all, S.pos ? 'Gần bạn nhất ở trên' : 'Chưa có GPS: kết quả trên toàn quốc');
+    }).catch(function (e) {
+      if (my !== seq) return;
+      if (e && e.message === 'shortlink') {
+        message('Link rút gọn chưa đọc được. Trong Google Maps, nhấn giữ vào điểm đến, chép dãy tọa độ (vd: 21.0285, 105.8542) rồi dán vào đây.');
+      } else message('Lỗi mạng, thử lại.');
+    });
   }
   function syncClear() { $('qClear').classList.toggle('hidden', !$('q').value); }
   $('q').addEventListener('keydown', function (e) { if (e.keyCode === 13) doSearch(); });
@@ -334,7 +341,7 @@
     if (confirm('Đi đến điểm này?')) goTo({ lat: lat, lon: lon, name: 'Điểm đã chọn' });
   };
   map.onPan = function () {
-    S.follow = false; S.threeD = false; map.setNav(false);
+    S.follow = false; S.panned = true; S.threeD = false; map.setNav(false);
     $('btnCenter').classList.add('off');
   };
 

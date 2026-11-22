@@ -62,17 +62,69 @@
   }
 
   // ---------- Tìm địa chỉ ----------
+  // Hai nguồn chạy song song (Nominatim + Photon), ưu tiên trong ~60 km quanh vị trí,
+  // gộp kết quả trùng và xếp theo khoảng cách. Nhận cả tọa độ và link Google Maps dạng đầy đủ.
+  var PHOTON = 'https://photon.komoot.io/api/';
+  var VN_BOX = '102.1,8.2,109.6,23.4';
+
+  function parseCoords(q) {
+    var m = q.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) ||          // link Google Maps có ghim
+      q.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) ||                    // link Google Maps có @lat,lon
+      q.match(/[?&](?:q|ll|query|destination)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)/) ||
+      q.match(/^\s*(-?\d{1,2}\.\d+)\s*[,; ]\s*(-?\d{2,3}\.\d+)\s*$/); // "21.0285, 105.8542"
+    if (!m) return null;
+    var lat = +m[1], lon = +m[2];
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat: lat, lon: lon, name: 'Tọa độ ' + lat.toFixed(5) + ', ' + lon.toFixed(5), addr: 'Điểm đã dán' };
+  }
+
   function search(q, near) {
+    var c = parseCoords(q);
+    if (c) return Promise.resolve([c]);
+    if (/goo\.gl|maps\.app/.test(q)) return Promise.reject(new Error('shortlink'));
+
+    var tasks = [
+      searchNominatim(q, near, true).then(function (l) { return l.length || !near ? l : searchNominatim(q, near, false); }),
+      searchPhoton(q, near)
+    ].map(function (p) { return p.catch(function () { return []; }); });
+
+    return Promise.all(tasks).then(function (res) {
+      var all = res[0].concat(res[1]), out = [];
+      all.forEach(function (r) {
+        for (var i = 0; i < out.length; i++) if (dist(out[i], r) < 80) return; // bỏ kết quả trùng
+        out.push(r);
+      });
+      if (near) out.sort(function (a, b) { return dist(near, a) - dist(near, b); });
+      return out.slice(0, 10);
+    });
+  }
+
+  function searchNominatim(q, near, bounded) {
     var url = NOMINATIM + '?format=jsonv2&limit=8&countrycodes=vn&accept-language=vi&q=' + encodeURIComponent(q);
-    if (near) {
-      var d = 0.4; // ưu tiên kết quả gần vị trí hiện tại
-      url += '&viewbox=' + (near.lon - d) + ',' + (near.lat + d) + ',' + (near.lon + d) + ',' + (near.lat - d);
+    if (near && bounded) {
+      var d = 0.55; // khoảng 60 km
+      url += '&bounded=1&viewbox=' + (near.lon - d) + ',' + (near.lat + d) + ',' + (near.lon + d) + ',' + (near.lat - d);
     }
     return fetchJSON(url).then(function (list) {
       return list.map(function (r) {
         var parts = r.display_name.split(', ');
         return { lat: +r.lat, lon: +r.lon, name: r.name || parts[0], addr: parts.slice(1, 4).join(', ') };
       });
+    });
+  }
+
+  function searchPhoton(q, near) {
+    var url = PHOTON + '?limit=8&q=' + encodeURIComponent(q) + '&bbox=' + VN_BOX;
+    if (near) url += '&lat=' + near.lat + '&lon=' + near.lon + '&location_bias_scale=0.1&zoom=12';
+    return fetchJSON(url).then(function (j) {
+      return (j.features || []).map(function (f) {
+        var p = f.properties || {}, g = f.geometry.coordinates;
+        var street = [p.housenumber, p.street].filter(Boolean).join(' ');
+        var name = p.name || street || p.district || p.city || '';
+        var addr = [p.name ? street : '', p.district, p.city || p.county, p.state]
+          .filter(function (x, i, a) { return x && a.indexOf(x) === i && x !== name; }).join(', ');
+        return { lat: g[1], lon: g[0], name: name, addr: addr };
+      }).filter(function (r) { return r.name; });
     });
   }
 
