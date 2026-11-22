@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Chỉ Đường">
+<meta name="theme-color" content="#f4efe4">
+<title>Chỉ Đường Xe Máy</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Thanh tìm kiếm -->
+<div id="top">
+  <div id="searchRow">
+    <input id="q" type="search" placeholder="Đi đâu? (vd: Chợ Bến Thành)" autocomplete="off" enterkeyhint="search">
+    <button id="btnSearch" class="btn">Tìm</button>
+  </div>
+  <div id="results"></div>
+
+  <!-- Chỉ dẫn rẽ, hiện khi đang dẫn đường -->
+  <div id="turn" class="hidden">
+    <div id="turnIcon">↑</div>
+    <div id="turnText">
+      <div id="turnDist">—</div>
+      <div id="turnName">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- Cảnh báo camera -->
+<div id="camAlert" class="hidden">
+  <span class="camDot"></span>
+  <span>CAMERA TỐC ĐỘ</span>
+  <b id="camDist">—</b>
+</div>
+
+<!-- Bảng điều khiển dưới -->
+<div id="bottom">
+  <div id="dash">
+    <div id="speedBox">
+      <div id="speed">0</div>
+      <div class="unit">km/h <span id="offTag" class="hidden"></span></div>
+    </div>
+    <div id="limitBox" title="Giới hạn tốc độ">
+      <div id="limitSign"><span id="limit">--</span></div>
+      <div id="limitNote">giới hạn</div>
+    </div>
+    <div id="tripBox">
+      <div id="eta">--:--</div>
+      <div id="remain">Chưa có tuyến</div>
+    </div>
+  </div>
+  <!-- Hiệu chỉnh chênh lệch tốc độ, mở khi chạm vào số km/h -->
+  <div id="calib" class="hidden">
+    <div class="calTitle">Hiệu chỉnh cho khớp đồng hồ xe</div>
+    <div class="calRow">
+      <button id="offMinus" class="btn ghost">−</button>
+      <div id="offVal">0 km/h</div>
+      <button id="offPlus" class="btn ghost">+</button>
+    </div>
+    <div class="calHint">GPS đo: <b id="rawSpeed">0</b> km/h · Cảnh báo quá tốc độ vẫn dùng tốc độ thực GPS</div>
+    <div class="calRow">
+      <button id="offReset" class="btn ghost">Đặt lại 0</button>
+      <button id="offClose" class="btn">Xong</button>
+    </div>
+  </div>
+  <!-- Cài đặt nguồn dữ liệu Vietmap -->
+  <div id="settings" class="hidden">
+    <div class="calTitle">Dữ liệu Vietmap</div>
+    <div class="calHint">Dán khóa API Vietmap để tìm địa chỉ và tìm đường riêng cho xe máy bằng dữ liệu Vietmap. Không có khóa thì app dùng OpenStreetMap.</div>
+    <input id="vmKey" type="text" placeholder="Khóa API Vietmap" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="calHint" id="vmStatus"></div>
+    <div class="calRow">
+      <button id="setClear" class="btn ghost">Xóa khóa</button>
+      <button id="setSave" class="btn">Lưu</button>
+    </div>
+  </div>
+  <div id="actions">
+    <button id="btnCenter" class="btn ghost">◎ Về vị trí</button>
+    <button id="btnCam" class="btn ghost">＋ Camera</button>
+    <button id="btnBeep" class="btn ghost">🔔 Bíp: Bật</button>
+    <button id="btnSet" class="btn ghost" style="flex:0 0 44px">⚙</button>
+    <button id="btnStop" class="btn danger hidden">✕ Dừng</button>
+  </div>
+</div>
+
+<div id="zoom">
+  <button id="zIn" class="btn ghost">+</button>
+  <button id="zOut" class="btn ghost">−</button>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<!-- Màn hình bắt đầu: cần 1 lần chạm để iOS cho phép GPS và âm thanh -->
+<div id="start">
+  <div class="card">
+    <h1>Chỉ Đường<br><em>Xe Máy</em></h1>
+    <ul>
+      <li>Tốc độ thực theo GPS</li>
+      <li>Biển giới hạn tốc độ</li>
+      <li>Cảnh báo camera bắn tốc độ</li>
+    </ul>
+    <button id="btnStart" class="btn big">Bắt đầu</button>
+    <p class="tip">Mẹo: vào <b>Cài đặt › Màn hình &amp; Độ sáng › Tự động khóa › Không bao giờ</b> để màn hình không tắt khi đang đi.</p>
+  </div>
+</div>
+
+<script src="map.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
